@@ -1,0 +1,51 @@
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y wget cmake g++ gcc git libeigen3-dev libjpeg-dev libpng-dev 
+
+# Install miniforge
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O Miniforge3.sh && \
+    bash Miniforge3.sh -b -p /opt/miniforge3 && \
+    rm Miniforge3.sh
+
+ENV PATH="/opt/miniforge3/bin:${PATH}"
+ENV PATH=/usr/local/cuda-12.2/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH
+ENV CC=gcc-11
+ENV CXX=g++-11
+ENV CONDA_PREFIX=/opt/miniforge3
+
+ARG CACHE_BUST=1
+# Install MoSDeF software and compile LAMMPS
+CMD [ "/bin/bash" ]
+RUN conda init bash && \
+    echo "conda activate base" >> ~/.bashrc && \
+    conda update -n base --all -y && \ 
+    conda install -n base python=3.13 signac signac-flow row py3Dmol nglview mbuild=1.3.1 gmso=0.15 foyer=1.1 jupyter -y && \
+	echo "export LD_LIBRARY_PATH=\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc && \
+	echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc && \
+    git clone https://github.com/lammps/lammps.git && \
+    cd lammps && \
+    mkdir build && \
+    cd build && \
+    cmake -C ../cmake/presets/basic.cmake \
+          -C ../cmake/presets/nolib.cmake \
+          -DCMAKE_INSTALL_PREFIX=. \
+          -DBUILD_MPI=off \
+          -DPKG_PYTHON=on \
+          -DPython_EXECUTABLE=$CONDA_PREFIX/bin/python \
+          -DPKG_GPU=on \
+          -DGPU_API=cuda \
+          -DGPU_PREC=single \
+          -DGPU_ARCH="sm_60;sm_70;sm_75;sm_80" \
+          -DINSTALL_DOC=off \
+          -DINSTALL_EXAMPLES=off \
+          -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
+          ../cmake && \
+    cmake --build . --target all -j$(nproc)
+
+# Install Lammps build
+RUN cd lammps && \
+    cmake --install build --prefix=$CONDA_PREFIX
+
+SHELL ["/bin/bash", "--login", "-c"]
